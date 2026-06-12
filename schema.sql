@@ -84,7 +84,7 @@ insert into perfiles (nombre, rol, avatar) values
   ('Mamá', 'padre', '👩'),
   ('Raúl', 'jugador', '👑'),
   ('Izan', 'jugador', '👦'),
-  ('Martín', 'jugador', '🦁'),
+  ('Martín', 'jugador', '🤖'),
   ('María', 'jugador', '🦄'),
   ('Loreto', 'jugador', '👧'),
   ('Gabriel', 'jugador', '🚀'),
