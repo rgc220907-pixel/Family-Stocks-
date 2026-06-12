@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0e14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Family Stocks" />
+  <title>Family Stocks 📈</title>
+
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./css/styles.css" />
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Supabase JS (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+  <!-- ====================================================== -->
+  <!--  VISTA MÓVIL · El Padre (PWA)                          -->
+  <!-- ====================================================== -->
+  <div id="view-mobile" class="min-h-screen pb-24">
+
+    <!-- Header -->
+    <header class="px-5 pt-12 pb-3 sticky top-0 z-20 bg-[#0b0e14]/90 backdrop-blur">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-extrabold tracking-tight">Family&nbsp;Stocks 📈</h1>
+          <p class="text-xs flat">Mesa de operaciones · Padres</p>
+        </div>
+        <div class="text-right">
+          <div class="text-xs flat">PIN requerido</div>
+          <div class="mono text-sm">🔒 ····</div>
+        </div>
+      </div>
+      <div class="prime-flag prime-banner hidden mt-3 px-4 py-2 rounded-xl text-center text-sm">
+        🔥 DOMINGO PRIME DAY · ¡Todos los puntos valen ×3! 🔥
+      </div>
+    </header>
+
+    <!-- Panel: MERCADO DE TAREAS -->
+    <section class="tab-panel px-5 pt-2 fade-in" data-panel="mercado">
+      <h2 class="text-sm font-bold flat uppercase tracking-wider mb-3">Mercado de tareas</h2>
+      <div id="lista-positivas" class="flex flex-col gap-3"></div>
+    </section>
+
+    <!-- Panel: PENALIZACIONES -->
+    <section class="tab-panel px-5 pt-2 hidden fade-in" data-panel="penalizaciones">
+      <h2 class="text-sm font-bold flat uppercase tracking-wider mb-3">Penalizaciones</h2>
+      <div id="lista-negativas" class="flex flex-col gap-3"></div>
+    </section>
+
+    <!-- Panel: COMODÍN -->
+    <section class="tab-panel px-5 pt-2 hidden fade-in" data-panel="comodin">
+      <h2 class="text-sm font-bold flat uppercase tracking-wider mb-3">Comodín · operación manual</h2>
+      <form id="comodin-form" class="card p-5 flex flex-col gap-4">
+        <div>
+          <label class="text-xs flat">Descripción libre</label>
+          <input id="comodin-desc" type="text" placeholder="Ej. Ayudó al abuelo"
+                 class="w-full mt-1 bg-[#0b0e14] border border-[#28304a] rounded-xl px-4 py-3 outline-none focus:border-[#16c784]" />
+        </div>
+        <div>
+          <label class="text-xs flat">Puntos (puede ser negativo)</label>
+          <input id="comodin-pts" type="number" step="0.5" placeholder="Ej. 2.5"
+                 class="w-full mt-1 mono bg-[#0b0e14] border border-[#28304a] rounded-xl px-4 py-3 outline-none focus:border-[#16c784]" />
+        </div>
+        <p class="prime-flag hidden text-xs" style="color:#f107a3">Hoy es Prime Day: se aplicará ×3 automáticamente.</p>
+        <button type="submit"
+                class="bg-[#16c784] text-[#04150d] font-bold py-3 rounded-xl active:scale-95 transition">
+          Ejecutar operación
+        </button>
+      </form>
+    </section>
+
+    <!-- Tab bar -->
+    <nav class="tabbar fixed bottom-0 inset-x-0 z-30 px-6 py-3 flex justify-around">
+      <button class="tab active flex flex-col items-center gap-1 text-xs flat" data-tab="mercado">
+        <span class="tab-ico text-xl">📈</span> Mercado
+      </button>
+      <button class="tab flex flex-col items-center gap-1 text-xs flat" data-tab="penalizaciones">
+        <span class="tab-ico text-xl">📉</span> Penaliza
+      </button>
+      <button class="tab flex flex-col items-center gap-1 text-xs flat" data-tab="comodin">
+        <span class="tab-ico text-xl">🃏</span> Comodín
+      </button>
+    </nav>
+  </div>
+
+  <!-- ====================================================== -->
+  <!--  VISTA DASHBOARD · El Mac del salón                    -->
+  <!-- ====================================================== -->
+  <div id="view-dashboard" class="min-h-screen flex flex-col">
+
+    <!-- Top bar + Prime banner -->
+    <div class="px-8 pt-6 pb-4 flex items-end justify-between">
+      <div>
+        <h1 class="text-4xl font-extrabold tracking-tight">Family&nbsp;Stocks <span class="up">📈</span></h1>
+        <p class="flat capitalize" id="dash-fecha">—</p>
+      </div>
+      <div class="prime-flag prime-banner hidden px-6 py-3 rounded-2xl text-xl">
+        🔥 DOMINGO PRIME DAY · ×3 🔥
+      </div>
+    </div>
+
+    <!-- Ticker Wall Street -->
+    <div class="ticker-wrap">
+      <div id="ticker-track" class="ticker-track"></div>
+    </div>
+
+    <!-- Cuerpo: 3 columnas -->
+    <div class="flex-1 grid grid-cols-3 gap-6 p-8">
+
+      <!-- Podio Mensual (principal) -->
+      <div class="card p-6 flex flex-col">
+        <h2 class="text-lg font-bold mb-1">🏆 Ranking Mensual</h2>
+        <p class="text-xs flat mb-4">Se reinicia el día 1 de cada mes</p>
+        <div id="podio-mensual" class="flex flex-col gap-3"></div>
+      </div>
+
+      <!-- Podio Semanal -->
+      <div class="card p-6 flex flex-col">
+        <h2 class="text-lg font-bold mb-1">📅 Ranking Semanal</h2>
+        <p class="text-xs flat mb-4">Lunes → Domingo</p>
+        <div id="podio-semanal" class="flex flex-col gap-3"></div>
+      </div>
+
+      <!-- Panel de cotizaciones -->
+      <div class="card p-6 flex flex-col">
+        <h2 class="text-lg font-bold mb-1">📊 Cotizaciones de hoy</h2>
+        <p class="text-xs flat mb-4">Fluctuación diaria del mercado</p>
+        <div class="overflow-auto flex-1">
+          <table class="w-full text-sm">
+            <thead class="flat text-xs uppercase tracking-wider">
+              <tr class="border-b border-[#28304a]">
+                <th class="text-left py-2">Tarea</th>
+                <th class="text-right py-2">Base</th>
+                <th class="text-right py-2">Hoy</th>
+                <th class="text-right py-2">Var</th>
+              </tr>
+            </thead>
+            <tbody id="tabla-cotizaciones" class="mono"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!--  Hoja inferior: elegir jugador                         -->
+  <!-- ====================================================== -->
+  <div id="sheet-jugadores" class="hidden fixed inset-0 z-40 flex items-end justify-center bg-black/60">
+    <div class="card w-full max-w-md m-4 p-6 rounded-3xl fade-in">
+      <h3 class="text-lg font-bold mb-4">¿Para quién es esta operación?</h3>
+      <div id="sheet-jugadores-list" class="grid grid-cols-2 gap-3"></div>
+      <button id="sheet-cancel" class="w-full mt-4 py-3 rounded-xl border border-[#28304a] flat">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!--  Modal PIN                                             -->
+  <!-- ====================================================== -->
+  <div id="modal-pin" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+    <div class="card w-full max-w-xs m-4 p-7 rounded-3xl text-center fade-in">
+      <div class="text-3xl mb-2">🔒</div>
+      <h3 class="text-lg font-bold">Confirmar con PIN</h3>
+      <p class="text-xs flat mb-5">Solo padres pueden operar</p>
+
+      <div class="flex justify-center gap-3 mb-2">
+        <span class="pin-dot"></span><span class="pin-dot"></span>
+        <span class="pin-dot"></span><span class="pin-dot"></span>
+      </div>
+      <p id="pin-error" class="hidden down text-xs font-semibold mb-3">PIN incorrecto</p>
+
+      <div class="grid grid-cols-3 gap-3 mt-4">
+        <button class="pinkey py-4" data-pin="1">1</button>
+        <button class="pinkey py-4" data-pin="2">2</button>
+        <button class="pinkey py-4" data-pin="3">3</button>
+        <button class="pinkey py-4" data-pin="4">4</button>
+        <button class="pinkey py-4" data-pin="5">5</button>
+        <button class="pinkey py-4" data-pin="6">6</button>
+        <button class="pinkey py-4" data-pin="7">7</button>
+        <button class="pinkey py-4" data-pin="8">8</button>
+        <button class="pinkey py-4" data-pin="9">9</button>
+        <button class="pinkey py-4 flat" data-pin="del">⌫</button>
+        <button class="pinkey py-4" data-pin="0">0</button>
+        <span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="hidden"></div>
+
+  <script type="module" src="./js/api.js"></script>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

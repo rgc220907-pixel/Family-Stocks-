@@ -1,0 +1,156 @@
+/* ============================================================
+   Family Stocks · Estilos
+   Tailwind hace el trabajo pesado (CDN). Aquí: tokens, animaciones
+   y el ticker estilo Wall Street.
+   ============================================================ */
+
+:root {
+  --bg:        #0b0e14;
+  --bg-soft:   #131823;
+  --bg-card:   #1a2030;
+  --border:    #28304a;
+  --green:     #16c784;
+  --green-dim: #0f3d2e;
+  --red:       #ea3943;
+  --red-dim:   #4a1418;
+  --gold:      #ffd23f;
+  --silver:    #c8d0e0;
+  --bronze:    #cd7f32;
+  --txt:       #e7ecf5;
+  --txt-dim:   #8a94ad;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono { font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace; }
+
+/* --- Utilidades de color de mercado --- */
+.up    { color: var(--green); }
+.down  { color: var(--red); }
+.flat  { color: var(--txt-dim); }
+.bg-up   { background: var(--green-dim); }
+.bg-down { background: var(--red-dim); }
+
+/* --- Tarjetas --- */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+/* --- Botones de tarea (móvil) --- */
+.task-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  transition: transform .08s ease, border-color .15s ease, background .15s ease;
+}
+.task-btn:active { transform: scale(.97); }
+.task-btn.pos:active { border-color: var(--green); background: var(--green-dim); }
+.task-btn.neg:active { border-color: var(--red);   background: var(--red-dim); }
+
+/* --- Chip de fluctuación diaria --- */
+.flux {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: .3px;
+}
+.flux.up   { background: var(--green-dim); }
+.flux.down { background: var(--red-dim); }
+.flux.flat { background: #1f2536; }
+
+/* --- Pestañas inferiores (móvil) --- */
+.tabbar {
+  background: rgba(11,14,20,.92);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+}
+.tab.active { color: var(--green); }
+.tab.active .tab-ico { transform: translateY(-2px); }
+.tab-ico { transition: transform .15s ease; }
+
+/* ============================================================
+   TICKER (Dashboard) — cinta deslizante estilo bolsa
+   ============================================================ */
+.ticker-wrap {
+  overflow: hidden;
+  white-space: nowrap;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: #07090f;
+}
+.ticker-track {
+  display: inline-block;
+  padding: 10px 0;
+  animation: ticker 38s linear infinite;
+}
+.ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 26px;
+  font-size: 15px;
+  font-weight: 600;
+}
+@keyframes ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* --- Podio --- */
+.podium-1 { border-color: var(--gold);   box-shadow: 0 0 32px -8px var(--gold); }
+.podium-2 { border-color: var(--silver); }
+.podium-3 { border-color: var(--bronze); }
+
+/* --- Animación de "valor que sube/baja" al insertar --- */
+@keyframes pulseUp   { 0%{background:var(--green-dim)} 100%{background:var(--bg-card)} }
+@keyframes pulseDown { 0%{background:var(--red-dim)}   100%{background:var(--bg-card)} }
+.pulse-up   { animation: pulseUp   1s ease; }
+.pulse-down { animation: pulseDown 1s ease; }
+
+/* --- Domingo Prime Day banner --- */
+.prime-banner {
+  background: linear-gradient(90deg, #7b2ff7, #f107a3);
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+
+/* --- Scrollbar fina --- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* --- Numpad PIN --- */
+.pinkey {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-size: 26px;
+  font-weight: 600;
+  transition: transform .06s ease, background .1s ease;
+}
+.pinkey:active { transform: scale(.94); background: var(--bg-soft); }
+
+.pin-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--txt-dim);
+}
+.pin-dot.filled { background: var(--green); border-color: var(--green); }
+
+/* --- Helpers responsive de vista --- */
+#view-dashboard { display: none; }
+.is-dashboard #view-dashboard { display: block; }
+.is-dashboard #view-mobile    { display: none; }
+
+.fade-in { animation: fade .25s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
