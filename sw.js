@@ -1,33 +1,20 @@
-/* Family Stocks · Service Worker (PWA shell cache) */
-const CACHE = "family-stocks-v1";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./manifest.json",
-  "./css/styles.css",
-  "./js/app.js",
-  "./js/api.js",
-];
+const CACHE_NAME = 'family-stocks-live';
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+// Obliga al Service Worker a instalarse al instante
+self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
+// Toma el control de las pantallas de los móviles inmediatamente
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim());
 });
 
-self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  // Nunca cachear llamadas a Supabase ni CDNs dinámicos
-  if (url.origin !== self.location.origin) return;
-  e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request))
+// Estrategia "Network First": Siempre pide a Vercel la versión nueva.
+// Solo muestra caché viejo si el móvil pierde la conexión a internet (offline).
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    fetch(event.request)
+      .catch(() => caches.match(event.request))
   );
 });
