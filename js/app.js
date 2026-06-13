@@ -442,7 +442,6 @@ function abrirFormAccion(a) {
   f.elements["id"].value = a?.id || "";
   f.elements["nombre"].value = a?.nombre || "";
   f.elements["tipo"].value = a?.tipo || "activo";
-  f.elements["icono"].value = a?.icono || "";
   f.elements["precio_base"].value = a?.precio_base ?? 1;
   f.elements["volatilidad"].value = a?.volatilidad ?? 0;
   f.elements["paga_dividendo"].checked = a?.paga_dividendo || false;
@@ -464,7 +463,6 @@ async function guardarAccionForm(e) {
     id: f.elements["id"].value || null,
     nombre: f.elements["nombre"].value.trim(),
     tipo: f.elements["tipo"].value,
-    icono: f.elements["icono"].value.trim() || null,
     precio_base: parseFloat(f.elements["precio_base"].value),
     volatilidad: parseFloat(f.elements["volatilidad"].value) || 0,
     paga_dividendo: f.elements["paga_dividendo"].checked,
