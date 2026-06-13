@@ -5,12 +5,23 @@
    - Mercado L–S: validar tareas (compra) y multas (impacto patrimonio).
    - Domingo: liquidación + recompensa/penalización directa al Cash.
    - CRUD de acciones (valor de salida, volatilidad, dividendos).
+
+   El sistema visual es Tailwind inline (dark/zinc · brutalismo elegante).
+   Los tokens de abajo evitan repetir cadenas de utilidades en el markup.
    ============================================================ */
 
 import * as api from "./api.js";
 
 // --------- Parámetros del multiplicador (espejo de la tabla config) ---------
 const AP = 420, MID = 1110, CL = 1260; // 07:00 · 18:30 · 21:00 (min locales)
+
+// --------- Tokens visuales (Tailwind) ---------
+const UP = "text-emerald-400", DOWN = "text-red-500", MUTED = "text-zinc-500";
+const NUM = "font-mono tabular-nums";
+const TITLE = "text-[11px] font-semibold uppercase tracking-widest text-zinc-500";
+const BTN = "border border-zinc-800 px-3 py-2 text-sm text-zinc-200 transition-colors hover:bg-zinc-800";
+const PRIMARY = "w-full border border-emerald-500/50 px-3 py-2.5 text-sm font-semibold uppercase tracking-widest text-emerald-400 transition-colors hover:bg-emerald-500/10";
+const ROW = "flex items-center justify-between gap-3 bg-zinc-900 px-3 py-3 text-left transition-colors hover:bg-zinc-800";
 
 const state = {
   vista: "ninos",          // 'ninos' | 'padres'
@@ -46,8 +57,15 @@ const fmt = (n) => {
   return (x > 0 ? "+" : "") + x.toFixed(Math.abs(x) % 1 === 0 ? 0 : 1);
 };
 const eur = (n) => (Number(n) || 0).toFixed(2);
-const flecha = (dir) => dir === "sube" ? "▲" : dir === "baja" ? "▼" : "▬";
-const claseDir = (dir) => dir === "sube" ? "up" : dir === "baja" ? "down" : "flat";
+const flecha = (dir) => dir === "sube" ? "▲" : dir === "baja" ? "▼" : "—";
+const colorDir = (dir) => dir === "sube" ? UP : dir === "baja" ? DOWN : MUTED;
+const signo = (v) => (Number(v) >= 0 ? UP : DOWN);
+
+// --------- Iconografía (Lucide) ---------
+// Los emojis quedan reservados a avatares; el resto de la UI usa estos iconos.
+const ic = (name, cls = "h-4 w-4") => `<i data-lucide="${name}" class="${cls}"></i>`;
+const divIcon = `<span title="Paga dividendo">${ic("coins", "inline-block h-3.5 w-3.5 align-[-0.2em] text-zinc-500")}</span>`;
+const pintarIconos = () => { if (window.lucide) window.lucide.createIcons(); };
 
 /* ============================================================
    CARGA DE DATOS
@@ -66,9 +84,10 @@ async function cargarTodo() {
 function toast(msg, tipo = "up") {
   const t = document.getElementById("toast");
   t.textContent = msg;
-  t.className = `toast show ${tipo}`;
+  const c = tipo === "up" ? "border-emerald-500/50 text-emerald-400" : "border-red-500/50 text-red-500";
+  t.className = `fixed left-1/2 bottom-6 z-[60] -translate-x-1/2 max-w-[90vw] border bg-zinc-900 px-4 py-2.5 text-xs tracking-wide ${NUM} ${c}`;
   clearTimeout(t._t);
-  t._t = setTimeout(() => (t.className = "toast"), 2400);
+  t._t = setTimeout(() => t.classList.add("hidden"), 2600);
 }
 
 function pedirPin(cb) {
@@ -131,24 +150,23 @@ function render() {
     b.classList.toggle("active", b.dataset.vista === state.vista));
   if (state.vista === "ninos") renderNinos();
   else renderPadres();
+  pintarIconos();
 }
 
 /* ---------------------- VISTA NIÑOS ---------------------- */
 function renderNinos() {
   renderReloj();
-  // Podios
-  renderPodio("podio-semanal", state.rankSemanal, "patrimonio_vivo", "Patrimonio Vivo");
-  renderPodio("podio-global", state.rankGlobal, "cash_global", "Cash Global");
-  // Pizarra
-  const tBody = document.getElementById("pizarra-body");
-  tBody.innerHTML = state.pizarra.map((a) => `
-    <tr class="${a.tipo === 'pasivo' ? 'fila-pasivo' : ''}">
-      <td class="py-2">${a.icono || ''} ${a.nombre}
-        ${a.paga_dividendo ? `<span title="Paga dividendo ${a.dividendo_frecuencia}">🪙</span>` : ''}</td>
-      <td class="py-2 mono text-right">${a.tipo === 'pasivo' ? '−' : ''}${eur(a.precio_actual)}</td>
-      <td class="py-2 text-right ${claseDir(a.direccion)} font-bold">
-        ${flecha(a.direccion)} ${Number(a.variacion) !== 0 ? fmt(a.variacion) : ''}</td>
-    </tr>`).join("");
+  renderPodio("podio-semanal", state.rankSemanal, "patrimonio_vivo");
+  renderPodio("podio-global", state.rankGlobal, "cash_global");
+
+  document.getElementById("pizarra-body").innerHTML = state.pizarra.map((a) => {
+    const pasivo = a.tipo === "pasivo";
+    return `<tr>
+      <td class="py-2 pr-2 text-zinc-200">${a.nombre}${a.paga_dividendo ? ` ${divIcon}` : ""}</td>
+      <td class="py-2 text-right ${NUM} ${pasivo ? DOWN : "text-zinc-100"}">${pasivo ? "−" : ""}${eur(a.precio_actual)}</td>
+      <td class="py-2 text-right ${NUM} ${colorDir(a.direccion)}">${flecha(a.direccion)} ${Number(a.variacion) !== 0 ? fmt(a.variacion) : ""}</td>
+    </tr>`;
+  }).join("");
 }
 
 function renderReloj() {
@@ -156,38 +174,39 @@ function renderReloj() {
   const m = multiplicadorHorario(now);
   const dom = esDomingo(now);
   const abierto = mercadoAbierto(now);
-  const cont = document.getElementById("reloj-mercado");
-  let estado, cls;
-  if (dom) { estado = "🔔 DOMINGO · Mercado cerrado (día de liquidación)"; cls = "flat"; }
-  else if (!abierto) { estado = "🌙 Mercado cerrado (abre 07:00)"; cls = "flat"; }
-  else { estado = `Multiplicador ahora`; cls = m >= 1 ? "up" : "down"; }
-  cont.innerHTML = `
-    <div class="hora mono">${now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</div>
-    <div class="estado ${cls}">${estado}</div>
-    ${(!dom && abierto) ? `<div class="mult mono ${cls}">×${m.toFixed(2)}</div>` : ""}`;
+  const col = (dom || !abierto) ? MUTED : (m >= 1 ? UP : DOWN);
+  let estado;
+  if (dom) estado = "Domingo · cierre de mercado";
+  else if (!abierto) estado = "Mercado cerrado · abre 07:00";
+  else estado = "Multiplicador en vivo";
+
+  document.getElementById("reloj-mercado").innerHTML = `
+    <div class="flex items-baseline gap-4">
+      <div class="${NUM} text-3xl font-semibold tracking-tight text-zinc-100">${now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</div>
+      <div class="${TITLE} ${col}">${estado}</div>
+      ${(!dom && abierto) ? `<div class="ml-auto ${NUM} text-2xl font-semibold ${col}">×${m.toFixed(2)}</div>` : ""}
+    </div>`;
 }
 
-function renderPodio(id, ranking, campo, etiqueta) {
-  const medalla = (i) => ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
+function renderPodio(id, ranking, campo) {
   document.getElementById(id).innerHTML = ranking.map((j, i) => {
     const v = Number(j[campo]) || 0;
-    const cls = i === 0 ? "podium-1" : i === 1 ? "podium-2" : i === 2 ? "podium-3" : "";
-    return `<div class="card ${cls} podio-row">
-      <span class="medalla">${medalla(i)}</span>
-      <span class="avatar">${j.avatar || "👤"}</span>
-      <span class="nombre">${j.nombre}</span>
-      <span class="valor mono ${v >= 0 ? "up" : "down"}">${eur(v)}</span>
+    const accent = i === 0 ? "border-l-emerald-500" : "border-l-transparent";
+    return `<div class="flex items-center gap-3 border-l-2 ${accent} bg-zinc-900 px-3 py-2.5">
+      <span class="${NUM} w-5 text-xs text-zinc-600">${String(i + 1).padStart(2, "0")}</span>
+      <span class="text-xl leading-none">${j.avatar || "·"}</span>
+      <span class="flex-1 truncate text-sm font-medium text-zinc-100">${j.nombre}</span>
+      <span class="${NUM} text-base font-semibold ${signo(v)}">${eur(v)}</span>
     </div>`;
-  }).join("") + `<p class="podio-etiqueta flat">${etiqueta}</p>`;
+  }).join("");
 }
 
 /* ---------------------- VISTA PADRES ---------------------- */
 function renderPadres() {
   const dom = esDomingo();
   document.getElementById("padres-modo").textContent =
-    dom ? "🔔 Modo Liquidación (Domingo)" : "📈 Mercado abierto · Broker";
+    dom ? "Modo liquidación · Domingo" : "Mercado abierto · Broker";
 
-  // Navegación interna
   const wrap = document.getElementById("padres-contenido");
   if (state.paso === "acciones") return renderEditorAcciones(wrap);
   if (!state.hijo)              return renderGridHijos(wrap, dom);
@@ -195,35 +214,47 @@ function renderPadres() {
   return renderOperar(wrap);
 }
 
-function botonVolver(label = "← Volver") {
-  return `<button class="btn-volver" id="btn-volver">${label}</button>`;
+function botonVolver(label = "Volver") {
+  return `<button id="btn-volver" class="mb-3 inline-flex items-center gap-1 text-[11px] uppercase tracking-widest text-zinc-500 transition-colors hover:text-zinc-200">${ic("arrow-left", "h-3.5 w-3.5")}${label}</button>`;
 }
 function bindVolver(fn) {
   const b = document.getElementById("btn-volver");
   if (b) b.onclick = fn;
 }
 
+function headerHijo(extra = "") {
+  const h = state.hijo;
+  return `<div class="mb-4 flex items-center gap-3 border border-zinc-800 bg-zinc-900 px-3 py-2.5">
+    <span class="text-2xl leading-none">${h.avatar || "·"}</span>
+    <div class="flex-1">
+      <div class="text-sm font-semibold text-zinc-100">${h.nombre}</div>
+      <div class="${TITLE}">${extra}</div>
+    </div>
+  </div>`;
+}
+
 // Grid de hijos
 function renderGridHijos(wrap, dom) {
   wrap.innerHTML = `
-    <div class="barra-acciones">
-      <button class="btn-sec" id="ir-acciones">⚙️ Gestionar acciones</button>
+    <div class="mb-3 flex justify-end">
+      <button id="ir-acciones" class="${BTN} inline-flex items-center gap-1.5">${ic("settings", "h-4 w-4")}Gestionar acciones</button>
     </div>
-    <h2 class="titulo-sec">${dom ? "Elige un hijo para liquidar" : "Elige un hijo"}</h2>
-    <div class="grid-hijos">${state.hijos.map((h) => `
-      <button class="card hijo-card" data-id="${h.id}">
-        <span class="text-4xl">${h.avatar || "👤"}</span>
-        <span class="font-semibold mt-1">${h.nombre}</span>
-        <span class="text-xs flat mono mt-1">Cash ${eur(h.cash_global)}</span>
-      </button>`).join("")}</div>`;
+    <h2 class="${TITLE} mb-3">${dom ? "Selecciona hijo · liquidación" : "Selecciona hijo"}</h2>
+    <div class="grid grid-cols-2 gap-px border border-zinc-800 bg-zinc-800 sm:grid-cols-3 lg:grid-cols-4">
+      ${state.hijos.map((h) => `
+        <button class="hijo-card flex flex-col items-center gap-1 bg-zinc-900 px-3 py-4 transition-colors hover:bg-zinc-800" data-id="${h.id}">
+          <span class="text-3xl leading-none">${h.avatar || "·"}</span>
+          <span class="text-sm font-medium text-zinc-100">${h.nombre}</span>
+          <span class="${NUM} text-[11px] ${MUTED}">${eur(h.cash_global)}</span>
+        </button>`).join("")}
+    </div>`;
   document.getElementById("ir-acciones").onclick = () => { state.paso = "acciones"; render(); };
   wrap.querySelectorAll(".hijo-card").forEach((b) =>
     b.onclick = () => { state.hijo = state.hijos.find((x) => x.id === b.dataset.id); render(); });
 }
 
-// Operar (L–S): validar tareas + penalizaciones
+// Operar (L–S): validar tareas + penalizaciones + comodín de Cash
 function renderOperar(wrap) {
-  const h = state.hijo;
   const activos = state.pizarra.filter((a) => a.tipo === "activo");
   const pasivos = state.pizarra.filter((a) => a.tipo === "pasivo");
   const m = multiplicadorHorario();
@@ -231,20 +262,19 @@ function renderOperar(wrap) {
 
   wrap.innerHTML = `
     ${botonVolver()}
-    <div class="op-header">
-      <span class="text-3xl">${h.avatar || "👤"}</span>
-      <div><div class="font-bold text-lg">${h.nombre}</div>
-        <div class="text-xs flat">Multiplicador ahora: <b class="${m >= 1 ? "up" : "down"}">×${m.toFixed(2)}</b></div></div>
-    </div>
-    ${!abierto ? `<div class="aviso">🌙 Mercado cerrado. Las operaciones se rechazarán hasta las 07:00.</div>` : ""}
-    <h3 class="titulo-sec up">📈 Mercado de tareas</h3>
-    <div class="lista-op">${activos.map((a) => tarjetaOp(a, "compra", m)).join("")}</div>
-    <h3 class="titulo-sec down mt-4">📉 Penalizaciones</h3>
-    <div class="lista-op">${pasivos.map((a) => tarjetaOp(a, "multa", m)).join("")}</div>
-    <h3 class="titulo-sec mt-4">🃏 Comodín de Cash Global (puntos manuales · caja fuerte)</h3>
-    <div class="semana-directo">
-      <button class="btn-sec up" id="comodin-mas">➕ Sumar Cash</button>
-      <button class="btn-sec down" id="comodin-menos">➖ Restar Cash</button>
+    ${headerHijo(`Multiplicador <span class="${NUM} ${m >= 1 ? UP : DOWN}">×${m.toFixed(2)}</span>`)}
+    ${!abierto ? `<div class="mb-3 border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-400">Mercado cerrado. Las operaciones se rechazarán hasta las 07:00.</div>` : ""}
+
+    <h3 class="${TITLE} mb-2">Mercado de tareas</h3>
+    <div class="mb-5 divide-y divide-zinc-800 border border-zinc-800">${activos.map((a) => tarjetaOp(a, "compra", m)).join("")}</div>
+
+    <h3 class="${TITLE} mb-2">Penalizaciones</h3>
+    <div class="mb-5 divide-y divide-zinc-800 border border-zinc-800">${pasivos.map((a) => tarjetaOp(a, "multa", m)).join("")}</div>
+
+    <h3 class="${TITLE} mb-2">Comodín · Cash Global</h3>
+    <div class="grid grid-cols-2 gap-2">
+      <button id="comodin-mas" class="${BTN} ${UP} inline-flex items-center justify-center gap-1.5">${ic("plus", "h-4 w-4")}Sumar Cash</button>
+      <button id="comodin-menos" class="${BTN} ${DOWN} inline-flex items-center justify-center gap-1.5">${ic("minus", "h-4 w-4")}Restar Cash</button>
     </div>`;
 
   bindVolver(() => { state.hijo = null; render(); });
@@ -256,14 +286,12 @@ function renderOperar(wrap) {
 function tarjetaOp(a, op, m) {
   const esCompra = op === "compra";
   const valor = esCompra ? a.precio_actual * m : a.precio_actual;
-  return `<button class="task-btn ${esCompra ? "pos" : "neg"}" data-op="${op}" data-id="${a.id}">
-    <div class="flex-1 min-w-0">
-      <div class="font-semibold truncate">${a.icono || ""} ${a.nombre}
-        ${a.paga_dividendo ? "🪙" : ""}</div>
-      <div class="text-xs flat">Hoy ${eur(a.precio_actual)} ${esCompra ? `· ×${m.toFixed(2)}` : ""}</div>
+  return `<button class="${ROW} w-full" data-op="${op}" data-id="${a.id}">
+    <div class="min-w-0">
+      <div class="truncate text-sm font-medium text-zinc-100">${a.nombre}${a.paga_dividendo ? ` ${divIcon}` : ""}</div>
+      <div class="${TITLE} mt-0.5">Hoy <span class="${NUM} text-zinc-400">${eur(a.precio_actual)}</span>${esCompra ? ` · ×${m.toFixed(2)}` : ""}</div>
     </div>
-    <div class="mono text-xl font-bold ${esCompra ? "up" : "down"}">
-      ${esCompra ? "+" : "−"}${eur(valor)}</div>
+    <div class="${NUM} text-base font-semibold ${esCompra ? UP : DOWN}">${esCompra ? "+" : "−"}${eur(valor)}</div>
   </button>`;
 }
 
@@ -274,24 +302,24 @@ async function operar(op, accionId) {
       ? await api.validarTarea(state.hijo.id, accionId, state.pin)
       : await api.penalizarMercado(state.hijo.id, accionId, state.pin);
     if (op === "compra")
-      toast(`✅ ${accion.nombre}: +${r.acciones_anadidas} acc · valor +${eur(r.valor_operacion)}`, "up");
+      toast(`OK ${accion.nombre}  +${r.acciones_anadidas} acc · +${eur(r.valor_operacion)}`, "up");
     else
-      toast(`⚠️ ${accion.nombre}: ${eur(r.impacto)} al patrimonio`, "down");
+      toast(`${accion.nombre}  ${eur(r.impacto)} patrimonio`, "down");
     await refrescar();
-  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+  } catch (e) { toast("ERROR · " + (e.message || "fallo"), "down"); }
 }
 
 // Liquidación de domingo
 async function renderLiquidacion(wrap) {
   const h = state.hijo;
-  wrap.innerHTML = `${botonVolver()}<div class="op-header">
-    <span class="text-3xl">${h.avatar || "👤"}</span>
-    <div><div class="font-bold text-lg">${h.nombre}</div>
-      <div class="text-xs flat">Cash Global actual: <b class="mono">${eur(h.cash_global)}</b></div></div>
-    </div><div id="cartera-zona" class="flat">Cargando cartera…</div>
-    <div class="domingo-directo">
-      <button class="btn-sec down" id="pen-directa">➖ Penalización directa</button>
-      <button class="btn-sec up" id="rec-directa">➕ Recompensa directa</button>
+  wrap.innerHTML = `
+    ${botonVolver()}
+    ${headerHijo(`Cash Global <span class="${NUM} text-zinc-300">${eur(h.cash_global)}</span>`)}
+    <div id="cartera-zona" class="text-sm text-zinc-500">Cargando cartera…</div>
+    <h3 class="${TITLE} mb-2 mt-5">Operación directa al Cash</h3>
+    <div class="grid grid-cols-2 gap-2">
+      <button id="rec-directa" class="${BTN} ${UP} inline-flex items-center justify-center gap-1.5">${ic("plus", "h-4 w-4")}Recompensa</button>
+      <button id="pen-directa" class="${BTN} ${DOWN} inline-flex items-center justify-center gap-1.5">${ic("minus", "h-4 w-4")}Penalización</button>
     </div>`;
   bindVolver(() => { state.hijo = null; render(); });
   document.getElementById("pen-directa").onclick = () => directa("pen");
@@ -299,23 +327,32 @@ async function renderLiquidacion(wrap) {
 
   const cartera = await api.getCarteraDetalle(h.id);
   const zona = document.getElementById("cartera-zona");
-  if (!cartera.length) { zona.innerHTML = `<p class="aviso">Cartera vacía. Nada que liquidar.</p>`; return; }
+  if (!cartera.length) {
+    zona.innerHTML = `<div class="border border-zinc-800 bg-zinc-900 px-3 py-3 text-xs ${MUTED}">Cartera vacía · nada que liquidar.</div>`;
+    return;
+  }
 
   zona.innerHTML = `
-    <h3 class="titulo-sec">Cartera de ${h.nombre} (precio de cierre)</h3>
-    <div class="liq-lista">${cartera.map((c) => `
-      <div class="card liq-row" data-accion="${c.accion_id}" data-precio="${c.precio_actual}" data-max="${c.cantidad}">
-        <div class="liq-info">
-          <div class="font-semibold">${c.icono || ""} ${c.nombre} ${c.paga_dividendo ? "🪙" : ""}</div>
-          <div class="text-xs flat mono">Tienes ${(+c.cantidad).toFixed(2)} acc · cierre ${eur(c.precio_actual)} → ${eur(c.valor_actual)}</div>
+    <h3 class="${TITLE} mb-2">Cartera · precio de cierre</h3>
+    <div class="mb-3 divide-y divide-zinc-800 border border-zinc-800">${cartera.map((c) => `
+      <div class="liq-row flex items-center justify-between gap-3 bg-zinc-900 px-3 py-3" data-accion="${c.accion_id}" data-precio="${c.precio_actual}" data-max="${c.cantidad}">
+        <div class="min-w-0">
+          <div class="text-sm font-medium text-zinc-100">${c.nombre}${c.paga_dividendo ? ` ${divIcon}` : ""}</div>
+          <div class="${TITLE} mt-0.5"><span class="${NUM} text-zinc-400">${(+c.cantidad).toFixed(2)}</span> acc · cierre <span class="${NUM} text-zinc-400">${eur(c.precio_actual)}</span> → <span class="${NUM} text-zinc-300">${eur(c.valor_actual)}</span></div>
         </div>
-        <div class="liq-inputs">
-          <label>Vender<input type="number" class="inp-vender" min="0" max="${c.cantidad}" step="0.01" value="0"></label>
-          <span class="conservar mono flat">Conserva ${(+c.cantidad).toFixed(2)}</span>
+        <div class="flex flex-col items-end gap-1">
+          <label class="flex items-center gap-2 ${TITLE}">Vender
+            <input type="number" class="inp-vender w-20 border border-zinc-800 bg-zinc-950 px-2 py-1 text-right text-zinc-100 ${NUM}" min="0" max="${c.cantidad}" step="0.01" value="0" />
+          </label>
+          <span class="conservar ${NUM} w-full text-right text-[11px] ${MUTED}">Conserva ${(+c.cantidad).toFixed(2)}</span>
         </div>
       </div>`).join("")}</div>
-    <div class="liq-total">Total a Cash: <b class="mono up" id="liq-total">0.00</b></div>
-    <button class="btn-primary" id="btn-liquidar">💰 Confirmar liquidación</button>`;
+    <div class="mb-3 flex items-center justify-between border border-zinc-800 bg-zinc-900 px-3 py-2.5">
+      <span class="${TITLE}">Total a Cash</span>
+      <span id="liq-total" class="${NUM} text-lg font-semibold ${UP}">0.00</span>
+    </div>
+    <button id="btn-liquidar" class="${PRIMARY}">Confirmar liquidación</button>`;
+  pintarIconos(); // la cartera se inyecta async; redibuja sus iconos
 
   // Cálculo en vivo del total + "conserva"
   zona.querySelectorAll(".inp-vender").forEach((inp) => inp.oninput = () => {
@@ -340,40 +377,40 @@ async function renderLiquidacion(wrap) {
     if (!await confirmar("¿Confirmar liquidación? Esta acción es IRREVERSIBLE.")) return;
     try {
       const r = await api.liquidar(h.id, ventas, state.pin);
-      toast(`💰 Liquidado: +${eur(r.cash_ingresado)} a Cash Global`, "up");
+      toast(`Liquidado · +${eur(r.cash_ingresado)} a Cash`, "up");
       await refrescar();
       state.hijo = state.hijos.find((x) => x.id === h.id); // refresca cash mostrado
       render();
-    } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+    } catch (e) { toast("ERROR · " + (e.message || "fallo"), "down"); }
   };
 }
 
 async function directa(tipo) {
   const h = state.hijo;
-  const monto = parseFloat(prompt(`${tipo === "rec" ? "Recompensa" : "Penalización"} directa a Cash Global para ${h.nombre}\nPuntos:`, "1"));
+  const monto = parseFloat(prompt(`${tipo === "rec" ? "Recompensa" : "Penalización"} directa a Cash Global · ${h.nombre}\nPuntos:`, "1"));
   if (!monto || monto <= 0) return;
   const nota = prompt("Motivo (opcional):", "") || null;
   try {
     const r = tipo === "rec"
       ? await api.recompensaDirecta(h.id, monto, nota, state.pin)
       : await api.penalizacionDirecta(h.id, monto, nota, state.pin);
-    toast(tipo === "rec" ? `➕ +${eur(r.cash_sumado)} a Cash` : `➖ −${eur(r.cash_restado)} de Cash`,
+    toast(tipo === "rec" ? `+${eur(r.cash_sumado)} a Cash` : `−${eur(r.cash_restado)} de Cash`,
           tipo === "rec" ? "up" : "down");
     await refrescar();
     state.hijo = state.hijos.find((x) => x.id === h.id);
     render();
-  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+  } catch (e) { toast("ERROR · " + (e.message || "fallo"), "down"); }
 }
 
 /* ---------------------- EDITOR DE ACCIONES (CRUD) ---------------------- */
 function renderEditorAcciones(wrap) {
   wrap.innerHTML = `
     ${botonVolver()}
-    <div class="barra-acciones">
-      <h2 class="titulo-sec">⚙️ Acciones del mercado</h2>
-      <button class="btn-primary" id="nueva-accion">＋ Nueva acción</button>
+    <div class="mb-3 flex items-center justify-between">
+      <h2 class="${TITLE}">Acciones del mercado</h2>
+      <button id="nueva-accion" class="${BTN} ${UP} inline-flex items-center gap-1.5">${ic("plus", "h-4 w-4")}Nueva</button>
     </div>
-    <div class="grid-acciones">${state.acciones.map(filaAccion).join("")}</div>`;
+    <div class="divide-y divide-zinc-800 border border-zinc-800">${state.acciones.map(filaAccion).join("")}</div>`;
   bindVolver(() => { state.paso = "hijos"; render(); });
   document.getElementById("nueva-accion").onclick = () => abrirFormAccion(null);
   wrap.querySelectorAll("[data-edit]").forEach((b) =>
@@ -383,15 +420,18 @@ function renderEditorAcciones(wrap) {
 }
 
 function filaAccion(a) {
-  return `<div class="card accion-row">
-    <div class="flex-1 min-w-0">
-      <div class="font-semibold">${a.icono || ""} ${a.nombre}
-        <span class="badge ${a.tipo === "activo" ? "up" : "down"}">${a.tipo}</span></div>
-      <div class="text-xs flat mono">Salida ${eur(a.precio_base)} · vol ${(+a.volatilidad).toFixed(2)}
-        ${a.paga_dividendo ? ` · 🪙 ${eur(a.dividendo_monto)}/${a.dividendo_frecuencia}` : ""}</div>
+  const esActivo = a.tipo === "activo";
+  const badge = esActivo ? "border-emerald-500/40 text-emerald-400" : "border-red-500/40 text-red-500";
+  return `<div class="flex items-center gap-2 bg-zinc-900 px-3 py-2.5">
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-2 text-sm font-medium text-zinc-100">
+        <span class="truncate">${a.nombre}</span>
+        <span class="border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${badge}">${a.tipo}</span>
+      </div>
+      <div class="${TITLE} mt-0.5">salida <span class="${NUM} text-zinc-400">${eur(a.precio_base)}</span> · vol <span class="${NUM} text-zinc-400">${(+a.volatilidad).toFixed(2)}</span>${a.paga_dividendo ? ` · ${divIcon} <span class="${NUM} text-zinc-400">${eur(a.dividendo_monto)}</span>/${a.dividendo_frecuencia}` : ""}</div>
     </div>
-    <button class="icon-btn" data-edit="${a.id}">✏️</button>
-    <button class="icon-btn" data-del="${a.id}">🗑️</button>
+    <button class="px-1 text-zinc-500 transition-colors hover:text-zinc-100" data-edit="${a.id}">${ic("square-pen", "h-4 w-4")}</button>
+    <button class="px-1 text-zinc-500 transition-colors hover:text-red-500" data-del="${a.id}">${ic("trash-2", "h-4 w-4")}</button>
   </div>`;
 }
 
@@ -436,18 +476,18 @@ async function guardarAccionForm(e) {
   try {
     await api.guardarAccion(state.pin, accion);
     document.getElementById("modal-accion").classList.add("hidden");
-    toast("✅ Acción guardada", "up");
+    toast("Acción guardada", "up");
     await refrescar();
-  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+  } catch (e) { toast("ERROR · " + (e.message || "fallo"), "down"); }
 }
 
 async function eliminarAccion(a) {
   if (!await confirmar(`¿Eliminar "${a.nombre}"? Se ocultará del mercado.`)) return;
   try {
     await api.eliminarAccion(state.pin, a.id);
-    toast("🗑️ Acción eliminada", "down");
+    toast("Acción eliminada", "down");
     await refrescar();
-  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+  } catch (e) { toast("ERROR · " + (e.message || "fallo"), "down"); }
 }
 
 /* ============================================================
@@ -477,17 +517,14 @@ function cambiarVista(v) {
 async function init() {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 
-  // Switch de vista
   document.querySelectorAll(".switch-btn").forEach((b) =>
     b.onclick = () => cambiarVista(b.dataset.vista));
 
-  // PIN
   document.querySelectorAll("[data-pin]").forEach((b) =>
     b.onclick = () => pulsarPin(b.dataset.pin));
   document.getElementById("pin-cancel").onclick = () =>
     document.getElementById("modal-pin").classList.add("hidden");
 
-  // Form acción
   document.getElementById("form-accion").onsubmit = guardarAccionForm;
   document.getElementById("form-accion").elements["paga_dividendo"].onchange = toggleDivFields;
   document.getElementById("accion-cancel").onclick = () =>
@@ -499,7 +536,6 @@ async function init() {
   render();
   setInterval(renderReloj, 1000 * 30); // reloj/mercado en vivo (Vista Niños)
 
-  // Tiempo real: el Mac se actualiza solo
   try { api.suscribirCambios(async () => { await cargarTodo(); render(); }); } catch {}
 }
 

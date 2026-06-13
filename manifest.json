@@ -1,25 +1,25 @@
 {
   "name": "Family Stocks",
   "short_name": "FamStocks",
-  "description": "El mercado de valores de la limpieza y el comportamiento familiar.",
+  "description": "Simulador de inversión y mercado bursátil doméstico.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0b0e14",
-  "theme_color": "#0b0e14",
-  "categories": ["productivity", "lifestyle"],
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "categories": ["productivity", "lifestyle", "finance"],
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='192'%3E%3Crect width='192' height='192' rx='40' fill='%230b0e14'/%3E%3Ctext x='96' y='130' font-size='110' text-anchor='middle'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E",
+      "src": "public/logoapp.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512'%3E%3Crect width='512' height='512' rx='110' fill='%230b0e14'/%3E%3Ctext x='256' y='350' font-size='300' text-anchor='middle'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E",
+      "src": "public/logoapp.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

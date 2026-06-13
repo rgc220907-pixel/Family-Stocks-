@@ -1,148 +1,60 @@
 /* ============================================================
-   Family Stocks v2 · Estilos
+   Family Stocks · capa mínima.
+   El sistema visual vive en utilidades Tailwind (CDN). Aquí solo
+   lo que Tailwind no cubre cómodamente: reset, estados con clase-
+   marcador que conmuta el JS, y afinado de inputs/scrollbar.
    ============================================================ */
-:root {
-  --bg:#0b0e14; --bg-soft:#131823; --bg-card:#1a2030; --border:#28304a;
-  --green:#16c784; --green-dim:#0f3d2e; --red:#ea3943; --red-dim:#4a1418;
-  --gold:#ffd23f; --silver:#c8d0e0; --bronze:#cd7f32;
-  --txt:#e7ecf5; --txt-dim:#8a94ad;
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; }
+body {
+  background: #09090b;            /* zinc-950 */
+  color: #f4f4f5;                 /* zinc-100 */
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-* { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-html,body { margin:0; background:var(--bg); color:var(--txt);
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",system-ui,sans-serif;
-  -webkit-font-smoothing:antialiased; }
-.mono { font-family:"SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; }
-.hidden { display:none !important; }
-.up{color:var(--green)} .down{color:var(--red)} .flat{color:var(--txt-dim)}
-.mt-1{margin-top:.25rem} .mt-2{margin-top:.5rem} .mt-4{margin-top:1rem} .mb-2{margin-bottom:.5rem}
-.mb-3{margin-bottom:.75rem} .mb-4{margin-bottom:1rem} .flex{display:flex} .gap-3{gap:.75rem}
-.flex-1{flex:1} .min-w-0{min-width:0} .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.text-right{text-align:right} .text-xs{font-size:11px} .text-lg{font-size:18px}
-.text-3xl{font-size:30px} .text-4xl{font-size:36px} .text-xl{font-size:20px}
-.font-semibold{font-weight:600} .font-bold{font-weight:700}
+.hidden { display: none !important; }
 
-.card { background:var(--bg-card); border:1px solid var(--border); border-radius:16px; }
-
-/* --------------------- Topbar / switch --------------------- */
-.topbar { position:sticky; top:0; z-index:30; display:flex; align-items:center;
-  justify-content:space-between; padding:14px 20px; padding-top:max(14px,env(safe-area-inset-top));
-  background:rgba(11,14,20,.92); backdrop-filter:blur(14px); border-bottom:1px solid var(--border); }
-.brand { font-size:20px; font-weight:800; letter-spacing:-.3px; }
-.switch { display:flex; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:3px; }
-.switch-btn { border:0; background:transparent; color:var(--txt-dim); font-weight:600;
-  padding:7px 14px; border-radius:9px; cursor:pointer; font-size:14px; }
-.switch-btn.active { background:var(--green); color:#04150d; }
-
-.vista { padding:18px; max-width:1400px; margin:0 auto; }
-
-/* --------------------- Vista Niños --------------------- */
-.reloj { display:flex; align-items:center; gap:18px; padding:16px 22px; margin-bottom:16px; flex-wrap:wrap; }
-.reloj .hora { font-size:34px; font-weight:800; }
-.reloj .estado { font-weight:600; }
-.reloj .mult { font-size:28px; font-weight:800; margin-left:auto; }
-
-.ninos-grid { display:grid; grid-template-columns:1fr; gap:16px; }
-@media (min-width:1024px) and (orientation:landscape) {
-  .ninos-grid { grid-template-columns:1fr 1fr 1.3fr; align-items:start; }
+/* --- Switch de vista (estado .active lo conmuta render()) --- */
+.switch-btn {
+  padding: .4rem .85rem;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .15em;
+  color: #71717a;                 /* zinc-500 */
+  background: transparent; border: 0; cursor: pointer;
+  transition: background-color .15s, color .15s;
 }
-.panel { padding:18px; }
-.panel-title { font-size:14px; font-weight:700; color:var(--txt-dim);
-  text-transform:uppercase; letter-spacing:.5px; margin:0 0 14px; }
+.switch-btn:hover { color: #d4d4d8; }
+.switch-btn.active { background: #f4f4f5; color: #09090b; }
 
-.podio-row { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-bottom:8px; }
-.podio-row .medalla { font-size:22px; width:30px; text-align:center; }
-.podio-row .avatar { font-size:30px; }
-.podio-row .nombre { flex:1; font-weight:700; font-size:17px; }
-.podio-row .valor { font-size:22px; font-weight:800; }
-.podio-etiqueta { font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin:4px 0 0; }
-.podium-1{border-color:var(--gold); box-shadow:0 0 28px -10px var(--gold)}
-.podium-2{border-color:var(--silver)} .podium-3{border-color:var(--bronze)}
+/* --- Teclado PIN --- */
+.pinkey {
+  padding: .9rem 0; background: #18181b; border: 0; cursor: pointer;
+  color: #f4f4f5; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 1.15rem; font-variant-numeric: tabular-nums;
+  transition: background-color .12s;
+}
+.pinkey:hover  { background: #27272a; }
+.pinkey:active { background: #3f3f46; }
 
-.tabla { width:100%; font-size:14px; border-collapse:collapse; }
-.tabla th { color:var(--txt-dim); font-size:11px; text-transform:uppercase;
-  letter-spacing:.5px; text-align:left; padding-bottom:8px; border-bottom:1px solid var(--border); }
-.tabla td { border-bottom:1px solid var(--border); }
-.fila-pasivo td:first-child { color:#f0a0a5; }
+/* Estado del PIN (.filled lo conmuta renderPinDots()) */
+.pin-dot { width: .7rem; height: .7rem; border: 1px solid #3f3f46; }
+.pin-dot.filled { background: #34d399; border-color: #34d399; }
 
-/* --------------------- Vista Padres --------------------- */
-.padres-bar { margin-bottom:14px; }
-.modo { font-weight:700; font-size:16px; }
-.titulo-sec { font-size:15px; font-weight:700; margin:6px 0 12px; }
-.barra-acciones { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+/* --- Campos de formulario --- */
+.fld {
+  width: 100%; padding: .55rem .65rem;
+  background: #09090b; border: 1px solid #27272a; color: #f4f4f5;
+  font-size: .9rem; outline: none; border-radius: 2px;
+  transition: border-color .15s;
+}
+.fld:focus { border-color: #52525b; }
 
-.grid-hijos { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:12px; }
-.hijo-card { display:flex; flex-direction:column; align-items:center; padding:18px 10px; cursor:pointer;
-  transition:transform .08s, border-color .15s; }
-.hijo-card:active { transform:scale(.96); border-color:var(--green); }
+/* Inputs numéricos: sin spinners */
+input[type=number] { -moz-appearance: textfield; }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-.op-header { display:flex; align-items:center; gap:12px; margin:8px 0 16px; }
-.lista-op { display:flex; flex-direction:column; gap:10px; }
-.task-btn { display:flex; align-items:center; justify-content:space-between; gap:12px;
-  background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:14px;
-  width:100%; text-align:left; color:var(--txt); cursor:pointer; transition:transform .08s, border-color .15s; }
-.task-btn:active { transform:scale(.98); }
-.task-btn.pos:active { border-color:var(--green); }
-.task-btn.neg:active { border-color:var(--red); }
-
-.aviso { background:var(--red-dim); color:#ffd; border:1px solid var(--red);
-  padding:10px 14px; border-radius:12px; font-size:13px; margin-bottom:12px; }
-
-/* Liquidación domingo */
-.liq-lista { display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
-.liq-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 14px; }
-.liq-inputs { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
-.liq-inputs label { font-size:12px; color:var(--txt-dim); display:flex; align-items:center; gap:6px; }
-.inp-vender { width:80px; background:var(--bg); border:1px solid var(--border); color:var(--txt);
-  border-radius:8px; padding:6px 8px; text-align:right; font-family:"SF Mono",monospace; }
-.liq-total { font-size:16px; margin:8px 0 14px; }
-.domingo-directo, .semana-directo { display:flex; gap:10px; margin-top:12px; }
-.semana-directo .btn-sec { flex:1; }
-
-/* Editor de acciones */
-.grid-acciones { display:flex; flex-direction:column; gap:10px; }
-.accion-row { display:flex; align-items:center; gap:10px; padding:12px 14px; }
-.badge { font-size:10px; padding:2px 8px; border-radius:999px; border:1px solid currentColor; margin-left:6px; text-transform:uppercase; }
-.icon-btn { background:transparent; border:0; font-size:20px; cursor:pointer; padding:4px; }
-
-/* Botones */
-.btn-primary { background:var(--green); color:#04150d; font-weight:700; border:0;
-  padding:12px 18px; border-radius:12px; cursor:pointer; font-size:15px; transition:transform .08s; }
-.btn-primary:active { transform:scale(.97); }
-.btn-sec { background:var(--bg-card); border:1px solid var(--border); color:var(--txt);
-  font-weight:600; padding:11px 16px; border-radius:12px; cursor:pointer; font-size:14px; }
-.btn-sec.up{ border-color:var(--green); color:var(--green) }
-.btn-sec.down{ border-color:var(--red); color:var(--red) }
-.btn-volver { background:transparent; border:0; color:var(--txt-dim); font-weight:600;
-  font-size:15px; cursor:pointer; padding:6px 0; margin-bottom:8px; }
-
-/* --------------------- Modales --------------------- */
-.modal { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
-  background:rgba(0,0,0,.78); padding:18px; }
-.modal-box { width:100%; max-width:360px; padding:24px; border-radius:24px; text-align:center; }
-.modal-form { max-width:440px; text-align:left; }
-.pin-box .pin-dots { display:flex; justify-content:center; gap:12px; margin:6px 0; }
-.pin-dot { width:16px; height:16px; border-radius:50%; border:2px solid var(--txt-dim); }
-.pin-dot.filled { background:var(--green); border-color:var(--green); }
-.numpad { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:18px; }
-.pinkey { background:var(--bg-card); border:1px solid var(--border); color:var(--txt);
-  border-radius:14px; font-size:24px; font-weight:600; padding:16px 0; cursor:pointer; transition:transform .06s; }
-.pinkey:active { transform:scale(.94); background:var(--bg-soft); }
-
-.form-grid { display:flex; flex-direction:column; gap:12px; }
-.form-grid label { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--txt-dim); }
-.form-grid input, .form-grid select { background:var(--bg); border:1px solid var(--border);
-  color:var(--txt); border-radius:10px; padding:10px 12px; font-size:15px; outline:none; }
-.form-grid input:focus, .form-grid select:focus { border-color:var(--green); }
-.row-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.check-row { flex-direction:row !important; align-items:center; gap:8px; color:var(--txt) !important; }
-.check-row input { width:auto; }
-
-/* --------------------- Toast --------------------- */
-.toast { position:fixed; left:50%; transform:translateX(-50%) translateY(20px); bottom:28px;
-  padding:14px 22px; border-radius:14px; font-weight:700; z-index:60; opacity:0; pointer-events:none;
-  transition:opacity .2s, transform .2s; max-width:90vw; text-align:center; }
-.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
-.toast.up { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
-.toast.down { background:var(--red-dim); color:#ff9ba1; border:1px solid var(--red); }
-
-::-webkit-scrollbar{width:8px;height:8px} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
+/* --- Scrollbar fina --- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #27272a; }
+::-webkit-scrollbar-track { background: transparent; }
+::selection { background: rgba(52, 211, 153, .25); }
