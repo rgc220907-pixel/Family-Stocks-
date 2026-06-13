@@ -1,491 +1,506 @@
 /* ============================================================
-   Family Stocks · Lógica de negocio + UI
+   Family Stocks v2 · Lógica de aplicación
+   ------------------------------------------------------------
+   - Switch global Vista Niños (solo lectura) / Vista Padres (broker).
+   - Mercado L–S: validar tareas (compra) y multas (impacto patrimonio).
+   - Domingo: liquidación + recompensa/penalización directa al Cash.
+   - CRUD de acciones (valor de salida, volatilidad, dividendos).
    ============================================================ */
 
-import {
-  getJugadores, getTareas, getHistorial,
-  insertarMovimiento, suscribirHistorial
-} from "./api.js";
+import * as api from "./api.js";
 
-// ------------------------------------------------------------
-// Estado global
-// ------------------------------------------------------------
+// --------- Parámetros del multiplicador (espejo de la tabla config) ---------
+const AP = 420, MID = 1110, CL = 1260; // 07:00 · 18:30 · 21:00 (min locales)
+
 const state = {
-  jugadores: [],
-  tareas: [],
-  historial: [],
-  fluctuaciones: {},     // { tarea_id: -1 | 0 | +1 }
-  pinOk: false,
-  seleccion: null,       // tarea o comodín pendiente de asignar jugador
-  pinResolver: null,
+  vista: "ninos",          // 'ninos' | 'padres'
+  pin: null,               // PIN cacheado tras validar (se reenvía en cada RPC)
+  paso: "hijos",           // padres: 'hijos' | 'operar' | 'liquidar' | 'acciones'
+  hijo: null,              // hijo seleccionado
+  hijos: [], pizarra: [], acciones: [], rankSemanal: [], rankGlobal: [],
 };
 
-const PIN_CORRECTO = "2026";
+let onPinOk = null;        // callback pendiente del modal PIN
 
-// ============================================================
-//  EL MOTOR FINANCIERO
-// ============================================================
+/* ============================================================
+   HELPERS DE TIEMPO / MERCADO (cálculo local para el reloj)
+   ============================================================ */
+const minutos = (d) => d.getHours() * 60 + d.getMinutes();
+const esDomingo = (d = new Date()) => d.getDay() === 0;
+const mercadoAbierto = (d = new Date()) =>
+  !esDomingo(d) && minutos(d) >= AP && minutos(d) <= CL;
 
-// --- Fechas / periodos ---
-const ahora = () => new Date();
-
-function inicioSemana(d = ahora()) {
-  // Semana lunes→domingo
-  const x = new Date(d);
-  const dow = (x.getDay() + 6) % 7; // 0 = lunes
-  x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - dow);
-  return x;
+function multiplicadorHorario(d = new Date()) {
+  const m = minutos(d);
+  if (m <= AP) return 1.5;
+  if (m <= MID) return 1.5 + (1.0 - 1.5) * (m - AP) / (MID - AP);
+  if (m <= CL) return 1.0 + (0.5 - 1.0) * (m - MID) / (CL - MID);
+  return 0.5;
 }
 
-function inicioMes(d = ahora()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-}
+/* ============================================================
+   FORMATO
+   ============================================================ */
+const fmt = (n) => {
+  const x = Number(n) || 0;
+  return (x > 0 ? "+" : "") + x.toFixed(Math.abs(x) % 1 === 0 ? 0 : 1);
+};
+const eur = (n) => (Number(n) || 0).toFixed(2);
+const flecha = (dir) => dir === "sube" ? "▲" : dir === "baja" ? "▼" : "▬";
+const claseDir = (dir) => dir === "sube" ? "up" : dir === "baja" ? "down" : "flat";
 
-function esDomingo(d = ahora()) {
-  return d.getDay() === 0;
-}
-
-// --- Sumatorio de puntos de un jugador en un rango ---
-function puntosEntre(perfilId, desde) {
-  return state.historial
-    .filter(h => h.perfil_id === perfilId && new Date(h.fecha) >= desde)
-    .reduce((acc, h) => acc + Number(h.puntos_finales), 0);
-}
-
-function puntosTotales(perfilId) {
-  return state.historial
-    .filter(h => h.perfil_id === perfilId)
-    .reduce((acc, h) => acc + Number(h.puntos_finales), 0);
-}
-
-// --- Rankings ---
-export function rankingSemanal() {
-  const desde = inicioSemana();
-  return state.jugadores
-    .map(j => ({ ...j, puntos: puntosEntre(j.id, desde) }))
-    .sort((a, b) => b.puntos - a.puntos);
-}
-
-export function rankingMensual() {
-  // Se "resetea" visualmente el día 1: solo cuenta historial del mes actual.
-  const desde = inicioMes();
-  return state.jugadores
-    .map(j => ({ ...j, puntos: puntosEntre(j.id, desde) }))
-    .sort((a, b) => b.puntos - a.puntos);
-}
-
-export function rankingTotal() {
-  return state.jugadores
-    .map(j => ({ ...j, puntos: puntosTotales(j.id) }))
-    .sort((a, b) => b.puntos - a.puntos);
-}
-
-// ============================================================
-//  EFECTO BOLSA — fluctuación diaria determinista por día
-// ============================================================
-
-// Hash estable: mismo día + misma tarea => misma fluctuación todo el día.
-function semillaDiaria(tareaId) {
-  const hoy = ahora();
-  const clave = `${hoy.getFullYear()}-${hoy.getMonth()}-${hoy.getDate()}-${tareaId}`;
-  let h = 0;
-  for (let i = 0; i < clave.length; i++) {
-    h = (h * 31 + clave.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function calcularFluctuaciones() {
-  const flux = {};
-  for (const t of state.tareas) {
-    const base = Math.abs(Number(t.puntos_base));
-    // Protegidas: 0.5 y 1 no fluctúan (se mantienen estables).
-    if (base === 0.5 || base === 1) {
-      flux[t.id] = 0;
-      continue;
-    }
-    const r = semillaDiaria(t.id) % 3; // 0,1,2
-    flux[t.id] = r === 0 ? -1 : r === 1 ? 0 : 1;
-  }
-  state.fluctuaciones = flux;
-}
-
-// Valor de cotización HOY de una tarea (base + fluctuación, signo conservado)
-function cotizacionHoy(tarea) {
-  const base = Number(tarea.puntos_base);
-  const f = state.fluctuaciones[tarea.id] || 0;
-  if (f === 0) return base;
-  // Sumamos en la dirección de la magnitud: positivas suben/bajan,
-  // negativas se hacen más/menos severas conservando el signo.
-  return base >= 0 ? base + f : base - f;
-}
-
-// ============================================================
-//  DOMINGO PRIME DAY — multiplicador x3
-// ============================================================
-function multiplicadorDelDia() {
-  return esDomingo() ? 3 : 1;
-}
-
-// Puntos finales a insertar = cotización de hoy * multiplicador
-function puntosFinales(tarea) {
-  return Number((cotizacionHoy(tarea) * multiplicadorDelDia()).toFixed(2));
-}
-
-// ============================================================
-//  CARGA DE DATOS
-// ============================================================
+/* ============================================================
+   CARGA DE DATOS
+   ============================================================ */
 async function cargarTodo() {
-  const [jugadores, tareas, historial] = await Promise.all([
-    getJugadores(), getTareas(), getHistorial()
+  const [hijos, pizarra, acciones, rs, rg] = await Promise.all([
+    api.getHijos(), api.getPizarra(), api.getAcciones(),
+    api.getRankingSemanal(), api.getRankingGlobal(),
   ]);
-  state.jugadores = jugadores;
-  state.tareas = tareas;
-  state.historial = historial;
-  calcularFluctuaciones();
+  Object.assign(state, { hijos, pizarra, acciones, rankSemanal: rs, rankGlobal: rg });
 }
 
-// ============================================================
-//  DETECCIÓN DE VISTA (móvil PWA vs dashboard Mac)
-// ============================================================
-function detectarVista() {
-  const landscape = window.innerWidth > window.innerHeight;
-  const ancho = window.innerWidth >= 1024;
-  const esDashboard = landscape && ancho;
-  document.body.classList.toggle("is-dashboard", esDashboard);
-  return esDashboard;
-}
-
-// ============================================================
-//  SEGURIDAD · PIN
-// ============================================================
-function pedirPin() {
-  // Si ya validó en esta sesión, no repetimos.
-  if (state.pinOk) return Promise.resolve(true);
-  return new Promise(resolve => {
-    state.pinResolver = resolve;
-    abrirModalPin();
-  });
-}
-
-let pinBuffer = "";
-function abrirModalPin() {
-  pinBuffer = "";
-  renderPinDots();
-  document.getElementById("modal-pin").classList.remove("hidden");
-}
-function cerrarModalPin() {
-  document.getElementById("modal-pin").classList.add("hidden");
-}
-function renderPinDots() {
-  document.querySelectorAll(".pin-dot").forEach((d, i) => {
-    d.classList.toggle("filled", i < pinBuffer.length);
-  });
-}
-function pulsarPin(val) {
-  const err = document.getElementById("pin-error");
-  err.classList.add("hidden");
-  if (val === "del") {
-    pinBuffer = pinBuffer.slice(0, -1);
-  } else if (pinBuffer.length < 4) {
-    pinBuffer += val;
-  }
-  renderPinDots();
-  if (pinBuffer.length === 4) {
-    setTimeout(() => {
-      if (pinBuffer === PIN_CORRECTO) {
-        state.pinOk = true;
-        cerrarModalPin();
-        const r = state.pinResolver; state.pinResolver = null;
-        if (r) r(true);
-      } else {
-        err.classList.remove("hidden");
-        pinBuffer = "";
-        renderPinDots();
-      }
-    }, 120);
-  }
-}
-
-// ============================================================
-//  INSERCIÓN DE MOVIMIENTOS
-// ============================================================
-async function ejecutarMovimiento({ tarea = null, descripcion = null, puntos }) {
-  // 1) Elegir jugador
-  const jugador = await elegirJugador();
-  if (!jugador) return;
-
-  // 2) PIN obligatorio en cada envío a BD
-  const ok = await pedirPin();
-  if (!ok) return;
-
-  // 3) Insertar
-  const mov = {
-    perfil_id: jugador.id,
-    tarea_id: tarea ? tarea.id : null,
-    descripcion_custom: descripcion,
-    puntos_finales: puntos,
-    fecha: new Date().toISOString(),
-  };
-  try {
-    const fila = await insertarMovimiento(mov);
-    state.historial.unshift(fila);
-    toast(`${jugador.avatar || "👤"} ${jugador.nombre}: ${puntos > 0 ? "+" : ""}${puntos} pts`,
-          puntos >= 0 ? "up" : "down");
-    refrescarUI();
-  } catch (e) {
-    toast("Error al guardar: " + e.message, "down");
-  }
-}
-
-// Selector de jugador (hoja inferior)
-function elegirJugador() {
-  return new Promise(resolve => {
-    const cont = document.getElementById("sheet-jugadores-list");
-    cont.innerHTML = "";
-    state.jugadores.forEach(j => {
-      const b = document.createElement("button");
-      b.className = "card p-4 flex flex-col items-center gap-1 active:scale-95 transition";
-      b.innerHTML = `<span class="text-4xl">${j.avatar || "👤"}</span>
-                     <span class="font-semibold">${j.nombre}</span>`;
-      b.onclick = () => { cerrarSheet(); resolve(j); };
-      cont.appendChild(b);
-    });
-    const sheet = document.getElementById("sheet-jugadores");
-    sheet.classList.remove("hidden");
-    sheet.dataset.cancel = "1";
-    sheet._resolve = resolve;
-  });
-}
-function cerrarSheet() {
-  const sheet = document.getElementById("sheet-jugadores");
-  sheet.classList.add("hidden");
-  if (sheet._resolve && sheet.dataset.cancel === "1") {
-    const r = sheet._resolve; sheet._resolve = null;
-    // no resolvemos null aquí si ya se eligió; se controla por flujo
-  }
-}
-
-// ============================================================
-//  RENDER · MÓVIL
-// ============================================================
-function flechaFlux(f) {
-  if (f > 0) return `<span class="flux up">▲ +1</span>`;
-  if (f < 0) return `<span class="flux down">▼ −1</span>`;
-  return `<span class="flux flat">▬ 0</span>`;
-}
-
-function fmt(n) {
-  const s = Number(n);
-  return (s > 0 ? "+" : "") + s.toFixed(s % 1 === 0 ? 0 : 1);
-}
-
-function renderMercado() {
-  const cont = document.getElementById("lista-positivas");
-  cont.innerHTML = "";
-  state.tareas.filter(t => t.tipo === "positiva").forEach(t => {
-    cont.appendChild(tarjetaTarea(t, "pos"));
-  });
-}
-
-function renderPenalizaciones() {
-  const cont = document.getElementById("lista-negativas");
-  cont.innerHTML = "";
-  state.tareas.filter(t => t.tipo === "negativa").forEach(t => {
-    cont.appendChild(tarjetaTarea(t, "neg"));
-  });
-}
-
-function tarjetaTarea(t, clase) {
-  const f = state.fluctuaciones[t.id] || 0;
-  const final = puntosFinales(t);
-  const prime = esDomingo();
-  const el = document.createElement("button");
-  el.className = `task-btn ${clase} p-4 w-full flex items-center justify-between text-left`;
-  el.innerHTML = `
-    <div class="flex-1 min-w-0">
-      <div class="font-semibold truncate">${t.nombre}</div>
-      <div class="text-xs flat mt-1 flex items-center gap-2">
-        Base ${fmt(t.puntos_base)} ${flechaFlux(f)}
-      </div>
-    </div>
-    <div class="text-right ml-3">
-      <div class="mono text-2xl font-bold ${final >= 0 ? "up" : "down"}">${fmt(final)}</div>
-      ${prime ? `<div class="text-[10px] font-bold" style="color:#f107a3">PRIME ×3</div>` : ""}
-    </div>`;
-  el.onclick = () => ejecutarMovimiento({ tarea: t, puntos: final });
-  return el;
-}
-
-function renderComodin() {
-  // listeners en init
-}
-
-// ============================================================
-//  RENDER · DASHBOARD (Mac)
-// ============================================================
-function medalla(i) { return ["🥇", "🥈", "🥉"][i] || `${i + 1}.`; }
-
-function renderPodio(contId, ranking) {
-  const cont = document.getElementById(contId);
-  cont.innerHTML = "";
-  ranking.forEach((j, i) => {
-    const cls = i === 0 ? "podium-1" : i === 1 ? "podium-2" : i === 2 ? "podium-3" : "";
-    const row = document.createElement("div");
-    row.className = `card ${cls} p-4 flex items-center gap-4 fade-in`;
-    row.innerHTML = `
-      <div class="text-3xl w-10 text-center">${medalla(i)}</div>
-      <div class="text-4xl">${j.avatar || "👤"}</div>
-      <div class="flex-1">
-        <div class="text-xl font-bold">${j.nombre}</div>
-        <div class="text-xs flat">posición ${i + 1}</div>
-      </div>
-      <div class="mono text-3xl font-bold ${j.puntos >= 0 ? "up" : "down"}">${fmt(j.puntos)}</div>`;
-    cont.appendChild(row);
-  });
-}
-
-function renderTicker() {
-  // Cinta deslizante: cada tarea con su cotización y flecha del día.
-  const items = state.tareas.map(t => {
-    const f = state.fluctuaciones[t.id] || 0;
-    const final = cotizacionHoy(t);
-    const sym = t.nombre.toUpperCase().slice(0, 12).replace(/\s+/g, "·");
-    const arrow = f > 0 ? "▲" : f < 0 ? "▼" : "▬";
-    const cls = f > 0 ? "up" : f < 0 ? "down" : "flat";
-    return `<span class="ticker-item">
-              <span class="mono">${sym}</span>
-              <span class="mono ${final >= 0 ? "up" : "down"}">${fmt(final)}</span>
-              <span class="${cls}">${arrow}</span>
-            </span>`;
-  }).join("");
-  // Duplicamos para loop continuo
-  document.getElementById("ticker-track").innerHTML = items + items;
-}
-
-function renderTablaCotizaciones() {
-  const tbody = document.getElementById("tabla-cotizaciones");
-  tbody.innerHTML = "";
-  state.tareas.forEach(t => {
-    const f = state.fluctuaciones[t.id] || 0;
-    const base = Number(t.puntos_base);
-    const final = cotizacionHoy(t);
-    const arrow = f > 0 ? "▲ +1" : f < 0 ? "▼ −1" : "▬ 0";
-    const cls = f > 0 ? "up" : f < 0 ? "down" : "flat";
-    const tr = document.createElement("tr");
-    tr.className = "border-b border-[#28304a]";
-    tr.innerHTML = `
-      <td class="py-2 pr-2">${t.nombre}</td>
-      <td class="py-2 mono text-right flat">${fmt(base)}</td>
-      <td class="py-2 mono text-right font-bold ${final >= 0 ? "up" : "down"}">${fmt(final)}</td>
-      <td class="py-2 text-right ${cls} font-semibold">${arrow}</td>`;
-    tbody.appendChild(tr);
-  });
-}
-
-function renderDashboard() {
-  renderPodio("podio-mensual", rankingMensual());
-  renderPodio("podio-semanal", rankingSemanal());
-  renderTicker();
-  renderTablaCotizaciones();
-  document.getElementById("dash-fecha").textContent =
-    ahora().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
-}
-
-// ============================================================
-//  REFRESCO GLOBAL
-// ============================================================
-function refrescarUI() {
-  if (detectarVista()) {
-    renderDashboard();
-  } else {
-    renderMercado();
-    renderPenalizaciones();
-  }
-  // Banner Prime Day
-  document.querySelectorAll(".prime-flag").forEach(el => {
-    el.classList.toggle("hidden", !esDomingo());
-  });
-}
-
-// ============================================================
-//  PESTAÑAS (móvil)
-// ============================================================
-function cambiarTab(nombre) {
-  document.querySelectorAll(".tab-panel").forEach(p =>
-    p.classList.toggle("hidden", p.dataset.panel !== nombre));
-  document.querySelectorAll(".tab").forEach(t =>
-    t.classList.toggle("active", t.dataset.tab === nombre));
-}
-
-// ============================================================
-//  TOASTS
-// ============================================================
+/* ============================================================
+   TOAST + MODALES
+   ============================================================ */
 function toast(msg, tipo = "up") {
   const t = document.getElementById("toast");
   t.textContent = msg;
-  t.className = `fixed left-1/2 -translate-x-1/2 bottom-24 px-5 py-3 rounded-xl font-semibold z-50 fade-in ${
-    tipo === "up" ? "bg-up up" : "bg-down down"}`;
-  t.classList.remove("hidden");
-  clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.add("hidden"), 2200);
+  t.className = `toast show ${tipo}`;
+  clearTimeout(t._t);
+  t._t = setTimeout(() => (t.className = "toast"), 2400);
 }
 
-// ============================================================
-//  INIT
-// ============================================================
-async function init() {
-  // Service worker para PWA (registro best-effort)
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+function pedirPin(cb) {
+  onPinOk = cb;
+  pinBuffer = "";
+  renderPinDots();
+  document.getElementById("pin-error").classList.add("hidden");
+  document.getElementById("modal-pin").classList.remove("hidden");
+}
+let pinBuffer = "";
+function renderPinDots() {
+  document.querySelectorAll("#modal-pin .pin-dot").forEach((d, i) =>
+    d.classList.toggle("filled", i < pinBuffer.length));
+}
+async function pulsarPin(v) {
+  document.getElementById("pin-error").classList.add("hidden");
+  if (v === "del") pinBuffer = pinBuffer.slice(0, -1);
+  else if (pinBuffer.length < 4) pinBuffer += v;
+  renderPinDots();
+  if (pinBuffer.length === 4) {
+    const intento = pinBuffer;
+    try {
+      const valido = await api.validarPin(intento);
+      if (valido) {
+        state.pin = intento;
+        document.getElementById("modal-pin").classList.add("hidden");
+        const cb = onPinOk; onPinOk = null;
+        if (cb) cb();
+      } else throw new Error();
+    } catch {
+      document.getElementById("pin-error").classList.remove("hidden");
+      pinBuffer = ""; renderPinDots();
+    }
   }
+}
 
-  detectarVista();
-  window.addEventListener("resize", () => { detectarVista(); refrescarUI(); });
-
-  // PIN numpad
-  document.querySelectorAll("[data-pin]").forEach(b =>
-    b.addEventListener("click", () => pulsarPin(b.dataset.pin)));
-
-  // Tabs
-  document.querySelectorAll(".tab").forEach(t =>
-    t.addEventListener("click", () => cambiarTab(t.dataset.tab)));
-
-  // Cancelar selector de jugador
-  document.getElementById("sheet-cancel").addEventListener("click", () => {
-    const sheet = document.getElementById("sheet-jugadores");
-    sheet.classList.add("hidden");
-    if (sheet._resolve) { const r = sheet._resolve; sheet._resolve = null; r(null); }
+function confirmar(texto) {
+  return new Promise((resolve) => {
+    const m = document.getElementById("modal-confirm");
+    document.getElementById("confirm-text").textContent = texto;
+    m.classList.remove("hidden");
+    const cleanup = (val) => {
+      m.classList.add("hidden");
+      document.getElementById("confirm-si").onclick = null;
+      document.getElementById("confirm-no").onclick = null;
+      resolve(val);
+    };
+    document.getElementById("confirm-si").onclick = () => cleanup(true);
+    document.getElementById("confirm-no").onclick = () => cleanup(false);
   });
+}
 
-  // Comodín
-  document.getElementById("comodin-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const desc = document.getElementById("comodin-desc").value.trim();
-    const pts = parseFloat(document.getElementById("comodin-pts").value);
-    if (!desc || isNaN(pts)) { toast("Completa descripción y puntos", "down"); return; }
-    const final = Number((pts * multiplicadorDelDia()).toFixed(2));
-    ejecutarMovimiento({ descripcion: desc, puntos: final });
-    e.target.reset();
-  });
+/* ============================================================
+   RENDER PRINCIPAL
+   ============================================================ */
+function render() {
+  document.getElementById("view-ninos").classList.toggle("hidden", state.vista !== "ninos");
+  document.getElementById("view-padres").classList.toggle("hidden", state.vista !== "padres");
+  document.querySelectorAll(".switch-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.vista === state.vista));
+  if (state.vista === "ninos") renderNinos();
+  else renderPadres();
+}
 
+/* ---------------------- VISTA NIÑOS ---------------------- */
+function renderNinos() {
+  renderReloj();
+  // Podios
+  renderPodio("podio-semanal", state.rankSemanal, "patrimonio_vivo", "Patrimonio Vivo");
+  renderPodio("podio-global", state.rankGlobal, "cash_global", "Cash Global");
+  // Pizarra
+  const tBody = document.getElementById("pizarra-body");
+  tBody.innerHTML = state.pizarra.map((a) => `
+    <tr class="${a.tipo === 'pasivo' ? 'fila-pasivo' : ''}">
+      <td class="py-2">${a.icono || ''} ${a.nombre}
+        ${a.paga_dividendo ? `<span title="Paga dividendo ${a.dividendo_frecuencia}">🪙</span>` : ''}</td>
+      <td class="py-2 mono text-right">${a.tipo === 'pasivo' ? '−' : ''}${eur(a.precio_actual)}</td>
+      <td class="py-2 text-right ${claseDir(a.direccion)} font-bold">
+        ${flecha(a.direccion)} ${Number(a.variacion) !== 0 ? fmt(a.variacion) : ''}</td>
+    </tr>`).join("");
+}
+
+function renderReloj() {
+  const now = new Date();
+  const m = multiplicadorHorario(now);
+  const dom = esDomingo(now);
+  const abierto = mercadoAbierto(now);
+  const cont = document.getElementById("reloj-mercado");
+  let estado, cls;
+  if (dom) { estado = "🔔 DOMINGO · Mercado cerrado (día de liquidación)"; cls = "flat"; }
+  else if (!abierto) { estado = "🌙 Mercado cerrado (abre 07:00)"; cls = "flat"; }
+  else { estado = `Multiplicador ahora`; cls = m >= 1 ? "up" : "down"; }
+  cont.innerHTML = `
+    <div class="hora mono">${now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</div>
+    <div class="estado ${cls}">${estado}</div>
+    ${(!dom && abierto) ? `<div class="mult mono ${cls}">×${m.toFixed(2)}</div>` : ""}`;
+}
+
+function renderPodio(id, ranking, campo, etiqueta) {
+  const medalla = (i) => ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
+  document.getElementById(id).innerHTML = ranking.map((j, i) => {
+    const v = Number(j[campo]) || 0;
+    const cls = i === 0 ? "podium-1" : i === 1 ? "podium-2" : i === 2 ? "podium-3" : "";
+    return `<div class="card ${cls} podio-row">
+      <span class="medalla">${medalla(i)}</span>
+      <span class="avatar">${j.avatar || "👤"}</span>
+      <span class="nombre">${j.nombre}</span>
+      <span class="valor mono ${v >= 0 ? "up" : "down"}">${eur(v)}</span>
+    </div>`;
+  }).join("") + `<p class="podio-etiqueta flat">${etiqueta}</p>`;
+}
+
+/* ---------------------- VISTA PADRES ---------------------- */
+function renderPadres() {
+  const dom = esDomingo();
+  document.getElementById("padres-modo").textContent =
+    dom ? "🔔 Modo Liquidación (Domingo)" : "📈 Mercado abierto · Broker";
+
+  // Navegación interna
+  const wrap = document.getElementById("padres-contenido");
+  if (state.paso === "acciones") return renderEditorAcciones(wrap);
+  if (!state.hijo)              return renderGridHijos(wrap, dom);
+  if (dom)                     return renderLiquidacion(wrap);
+  return renderOperar(wrap);
+}
+
+function botonVolver(label = "← Volver") {
+  return `<button class="btn-volver" id="btn-volver">${label}</button>`;
+}
+function bindVolver(fn) {
+  const b = document.getElementById("btn-volver");
+  if (b) b.onclick = fn;
+}
+
+// Grid de hijos
+function renderGridHijos(wrap, dom) {
+  wrap.innerHTML = `
+    <div class="barra-acciones">
+      <button class="btn-sec" id="ir-acciones">⚙️ Gestionar acciones</button>
+    </div>
+    <h2 class="titulo-sec">${dom ? "Elige un hijo para liquidar" : "Elige un hijo"}</h2>
+    <div class="grid-hijos">${state.hijos.map((h) => `
+      <button class="card hijo-card" data-id="${h.id}">
+        <span class="text-4xl">${h.avatar || "👤"}</span>
+        <span class="font-semibold mt-1">${h.nombre}</span>
+        <span class="text-xs flat mono mt-1">Cash ${eur(h.cash_global)}</span>
+      </button>`).join("")}</div>`;
+  document.getElementById("ir-acciones").onclick = () => { state.paso = "acciones"; render(); };
+  wrap.querySelectorAll(".hijo-card").forEach((b) =>
+    b.onclick = () => { state.hijo = state.hijos.find((x) => x.id === b.dataset.id); render(); });
+}
+
+// Operar (L–S): validar tareas + penalizaciones
+function renderOperar(wrap) {
+  const h = state.hijo;
+  const activos = state.pizarra.filter((a) => a.tipo === "activo");
+  const pasivos = state.pizarra.filter((a) => a.tipo === "pasivo");
+  const m = multiplicadorHorario();
+  const abierto = mercadoAbierto();
+
+  wrap.innerHTML = `
+    ${botonVolver()}
+    <div class="op-header">
+      <span class="text-3xl">${h.avatar || "👤"}</span>
+      <div><div class="font-bold text-lg">${h.nombre}</div>
+        <div class="text-xs flat">Multiplicador ahora: <b class="${m >= 1 ? "up" : "down"}">×${m.toFixed(2)}</b></div></div>
+    </div>
+    ${!abierto ? `<div class="aviso">🌙 Mercado cerrado. Las operaciones se rechazarán hasta las 07:00.</div>` : ""}
+    <h3 class="titulo-sec up">📈 Mercado de tareas</h3>
+    <div class="lista-op">${activos.map((a) => tarjetaOp(a, "compra", m)).join("")}</div>
+    <h3 class="titulo-sec down mt-4">📉 Penalizaciones</h3>
+    <div class="lista-op">${pasivos.map((a) => tarjetaOp(a, "multa", m)).join("")}</div>
+    <h3 class="titulo-sec mt-4">🃏 Comodín de Cash Global (puntos manuales · caja fuerte)</h3>
+    <div class="semana-directo">
+      <button class="btn-sec up" id="comodin-mas">➕ Sumar Cash</button>
+      <button class="btn-sec down" id="comodin-menos">➖ Restar Cash</button>
+    </div>`;
+
+  bindVolver(() => { state.hijo = null; render(); });
+  wrap.querySelectorAll("[data-op]").forEach((b) => b.onclick = () => operar(b.dataset.op, b.dataset.id));
+  document.getElementById("comodin-mas").onclick = () => directa("rec");
+  document.getElementById("comodin-menos").onclick = () => directa("pen");
+}
+
+function tarjetaOp(a, op, m) {
+  const esCompra = op === "compra";
+  const valor = esCompra ? a.precio_actual * m : a.precio_actual;
+  return `<button class="task-btn ${esCompra ? "pos" : "neg"}" data-op="${op}" data-id="${a.id}">
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold truncate">${a.icono || ""} ${a.nombre}
+        ${a.paga_dividendo ? "🪙" : ""}</div>
+      <div class="text-xs flat">Hoy ${eur(a.precio_actual)} ${esCompra ? `· ×${m.toFixed(2)}` : ""}</div>
+    </div>
+    <div class="mono text-xl font-bold ${esCompra ? "up" : "down"}">
+      ${esCompra ? "+" : "−"}${eur(valor)}</div>
+  </button>`;
+}
+
+async function operar(op, accionId) {
+  const accion = state.acciones.find((a) => a.id === accionId);
   try {
-    await cargarTodo();
-  } catch (e) {
-    toast("Error de conexión a Supabase. Revisa api.js", "down");
-    console.error(e);
-  }
+    const r = op === "compra"
+      ? await api.validarTarea(state.hijo.id, accionId, state.pin)
+      : await api.penalizarMercado(state.hijo.id, accionId, state.pin);
+    if (op === "compra")
+      toast(`✅ ${accion.nombre}: +${r.acciones_anadidas} acc · valor +${eur(r.valor_operacion)}`, "up");
+    else
+      toast(`⚠️ ${accion.nombre}: ${eur(r.impacto)} al patrimonio`, "down");
+    await refrescar();
+  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+}
 
-  refrescarUI();
+// Liquidación de domingo
+async function renderLiquidacion(wrap) {
+  const h = state.hijo;
+  wrap.innerHTML = `${botonVolver()}<div class="op-header">
+    <span class="text-3xl">${h.avatar || "👤"}</span>
+    <div><div class="font-bold text-lg">${h.nombre}</div>
+      <div class="text-xs flat">Cash Global actual: <b class="mono">${eur(h.cash_global)}</b></div></div>
+    </div><div id="cartera-zona" class="flat">Cargando cartera…</div>
+    <div class="domingo-directo">
+      <button class="btn-sec down" id="pen-directa">➖ Penalización directa</button>
+      <button class="btn-sec up" id="rec-directa">➕ Recompensa directa</button>
+    </div>`;
+  bindVolver(() => { state.hijo = null; render(); });
+  document.getElementById("pen-directa").onclick = () => directa("pen");
+  document.getElementById("rec-directa").onclick = () => directa("rec");
 
-  // Tiempo real (el Mac se actualiza solo cuando el móvil inserta)
-  try {
-    suscribirHistorial(async () => {
-      state.historial = await getHistorial();
-      refrescarUI();
+  const cartera = await api.getCarteraDetalle(h.id);
+  const zona = document.getElementById("cartera-zona");
+  if (!cartera.length) { zona.innerHTML = `<p class="aviso">Cartera vacía. Nada que liquidar.</p>`; return; }
+
+  zona.innerHTML = `
+    <h3 class="titulo-sec">Cartera de ${h.nombre} (precio de cierre)</h3>
+    <div class="liq-lista">${cartera.map((c) => `
+      <div class="card liq-row" data-accion="${c.accion_id}" data-precio="${c.precio_actual}" data-max="${c.cantidad}">
+        <div class="liq-info">
+          <div class="font-semibold">${c.icono || ""} ${c.nombre} ${c.paga_dividendo ? "🪙" : ""}</div>
+          <div class="text-xs flat mono">Tienes ${(+c.cantidad).toFixed(2)} acc · cierre ${eur(c.precio_actual)} → ${eur(c.valor_actual)}</div>
+        </div>
+        <div class="liq-inputs">
+          <label>Vender<input type="number" class="inp-vender" min="0" max="${c.cantidad}" step="0.01" value="0"></label>
+          <span class="conservar mono flat">Conserva ${(+c.cantidad).toFixed(2)}</span>
+        </div>
+      </div>`).join("")}</div>
+    <div class="liq-total">Total a Cash: <b class="mono up" id="liq-total">0.00</b></div>
+    <button class="btn-primary" id="btn-liquidar">💰 Confirmar liquidación</button>`;
+
+  // Cálculo en vivo del total + "conserva"
+  zona.querySelectorAll(".inp-vender").forEach((inp) => inp.oninput = () => {
+    let total = 0;
+    zona.querySelectorAll(".liq-row").forEach((row) => {
+      const precio = +row.dataset.precio, max = +row.dataset.max;
+      const i = row.querySelector(".inp-vender");
+      let v = Math.min(Math.max(+i.value || 0, 0), max);
+      row.querySelector(".conservar").textContent = `Conserva ${(max - v).toFixed(2)}`;
+      total += v * precio;
     });
-  } catch (_) { /* sin RT, no pasa nada */ }
+    document.getElementById("liq-total").textContent = eur(total);
+  });
+
+  document.getElementById("btn-liquidar").onclick = async () => {
+    const ventas = [];
+    zona.querySelectorAll(".liq-row").forEach((row) => {
+      const v = Math.min(Math.max(+row.querySelector(".inp-vender").value || 0, 0), +row.dataset.max);
+      if (v > 0) ventas.push({ accion_id: row.dataset.accion, cantidad: v });
+    });
+    if (!ventas.length) return toast("Indica alguna cantidad a vender", "down");
+    if (!await confirmar("¿Confirmar liquidación? Esta acción es IRREVERSIBLE.")) return;
+    try {
+      const r = await api.liquidar(h.id, ventas, state.pin);
+      toast(`💰 Liquidado: +${eur(r.cash_ingresado)} a Cash Global`, "up");
+      await refrescar();
+      state.hijo = state.hijos.find((x) => x.id === h.id); // refresca cash mostrado
+      render();
+    } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+  };
+}
+
+async function directa(tipo) {
+  const h = state.hijo;
+  const monto = parseFloat(prompt(`${tipo === "rec" ? "Recompensa" : "Penalización"} directa a Cash Global para ${h.nombre}\nPuntos:`, "1"));
+  if (!monto || monto <= 0) return;
+  const nota = prompt("Motivo (opcional):", "") || null;
+  try {
+    const r = tipo === "rec"
+      ? await api.recompensaDirecta(h.id, monto, nota, state.pin)
+      : await api.penalizacionDirecta(h.id, monto, nota, state.pin);
+    toast(tipo === "rec" ? `➕ +${eur(r.cash_sumado)} a Cash` : `➖ −${eur(r.cash_restado)} de Cash`,
+          tipo === "rec" ? "up" : "down");
+    await refrescar();
+    state.hijo = state.hijos.find((x) => x.id === h.id);
+    render();
+  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+}
+
+/* ---------------------- EDITOR DE ACCIONES (CRUD) ---------------------- */
+function renderEditorAcciones(wrap) {
+  wrap.innerHTML = `
+    ${botonVolver()}
+    <div class="barra-acciones">
+      <h2 class="titulo-sec">⚙️ Acciones del mercado</h2>
+      <button class="btn-primary" id="nueva-accion">＋ Nueva acción</button>
+    </div>
+    <div class="grid-acciones">${state.acciones.map(filaAccion).join("")}</div>`;
+  bindVolver(() => { state.paso = "hijos"; render(); });
+  document.getElementById("nueva-accion").onclick = () => abrirFormAccion(null);
+  wrap.querySelectorAll("[data-edit]").forEach((b) =>
+    b.onclick = () => abrirFormAccion(state.acciones.find((a) => a.id === b.dataset.edit)));
+  wrap.querySelectorAll("[data-del]").forEach((b) =>
+    b.onclick = () => eliminarAccion(state.acciones.find((a) => a.id === b.dataset.del)));
+}
+
+function filaAccion(a) {
+  return `<div class="card accion-row">
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold">${a.icono || ""} ${a.nombre}
+        <span class="badge ${a.tipo === "activo" ? "up" : "down"}">${a.tipo}</span></div>
+      <div class="text-xs flat mono">Salida ${eur(a.precio_base)} · vol ${(+a.volatilidad).toFixed(2)}
+        ${a.paga_dividendo ? ` · 🪙 ${eur(a.dividendo_monto)}/${a.dividendo_frecuencia}` : ""}</div>
+    </div>
+    <button class="icon-btn" data-edit="${a.id}">✏️</button>
+    <button class="icon-btn" data-del="${a.id}">🗑️</button>
+  </div>`;
+}
+
+function abrirFormAccion(a) {
+  const esNueva = !a;
+  const f = document.getElementById("form-accion");
+  f.reset();
+  f.elements["id"].value = a?.id || "";
+  f.elements["nombre"].value = a?.nombre || "";
+  f.elements["tipo"].value = a?.tipo || "activo";
+  f.elements["icono"].value = a?.icono || "";
+  f.elements["precio_base"].value = a?.precio_base ?? 1;
+  f.elements["volatilidad"].value = a?.volatilidad ?? 0;
+  f.elements["paga_dividendo"].checked = a?.paga_dividendo || false;
+  f.elements["dividendo_monto"].value = a?.dividendo_monto ?? 0;
+  f.elements["dividendo_frecuencia"].value = a?.dividendo_frecuencia || "ninguna";
+  document.getElementById("form-accion-titulo").textContent = esNueva ? "Nueva acción" : "Editar acción";
+  toggleDivFields();
+  document.getElementById("modal-accion").classList.remove("hidden");
+}
+function toggleDivFields() {
+  const on = document.getElementById("form-accion").elements["paga_dividendo"].checked;
+  document.getElementById("div-fields").classList.toggle("hidden", !on);
+}
+
+async function guardarAccionForm(e) {
+  e.preventDefault();
+  const f = e.target;
+  const accion = {
+    id: f.elements["id"].value || null,
+    nombre: f.elements["nombre"].value.trim(),
+    tipo: f.elements["tipo"].value,
+    icono: f.elements["icono"].value.trim() || null,
+    precio_base: parseFloat(f.elements["precio_base"].value),
+    volatilidad: parseFloat(f.elements["volatilidad"].value) || 0,
+    paga_dividendo: f.elements["paga_dividendo"].checked,
+    dividendo_monto: parseFloat(f.elements["dividendo_monto"].value) || 0,
+    dividendo_frecuencia: f.elements["dividendo_frecuencia"].value,
+  };
+  if (!accion.nombre || isNaN(accion.precio_base) || accion.precio_base <= 0)
+    return toast("Nombre y valor de salida (>0) obligatorios", "down");
+  try {
+    await api.guardarAccion(state.pin, accion);
+    document.getElementById("modal-accion").classList.add("hidden");
+    toast("✅ Acción guardada", "up");
+    await refrescar();
+  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+}
+
+async function eliminarAccion(a) {
+  if (!await confirmar(`¿Eliminar "${a.nombre}"? Se ocultará del mercado.`)) return;
+  try {
+    await api.eliminarAccion(state.pin, a.id);
+    toast("🗑️ Acción eliminada", "down");
+    await refrescar();
+  } catch (e) { toast("❌ " + (e.message || "Error"), "down"); }
+}
+
+/* ============================================================
+   REFRESCO
+   ============================================================ */
+async function refrescar() {
+  await cargarTodo();
+  render();
+}
+
+/* ============================================================
+   CAMBIO DE VISTA
+   ============================================================ */
+function cambiarVista(v) {
+  if (v === "padres" && !state.pin) {
+    pedirPin(() => { state.vista = "padres"; state.paso = "hijos"; state.hijo = null; render(); });
+    return;
+  }
+  state.vista = v;
+  if (v === "padres") { state.paso = "hijos"; state.hijo = null; }
+  render();
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+async function init() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+
+  // Switch de vista
+  document.querySelectorAll(".switch-btn").forEach((b) =>
+    b.onclick = () => cambiarVista(b.dataset.vista));
+
+  // PIN
+  document.querySelectorAll("[data-pin]").forEach((b) =>
+    b.onclick = () => pulsarPin(b.dataset.pin));
+  document.getElementById("pin-cancel").onclick = () =>
+    document.getElementById("modal-pin").classList.add("hidden");
+
+  // Form acción
+  document.getElementById("form-accion").onsubmit = guardarAccionForm;
+  document.getElementById("form-accion").elements["paga_dividendo"].onchange = toggleDivFields;
+  document.getElementById("accion-cancel").onclick = () =>
+    document.getElementById("modal-accion").classList.add("hidden");
+
+  try { await cargarTodo(); }
+  catch (e) { toast("Error de conexión a Supabase (revisa api.js)", "down"); console.error(e); }
+
+  render();
+  setInterval(renderReloj, 1000 * 30); // reloj/mercado en vivo (Vista Niños)
+
+  // Tiempo real: el Mac se actualiza solo
+  try { api.suscribirCambios(async () => { await cargarTodo(); render(); }); } catch {}
 }
 
 document.addEventListener("DOMContentLoaded", init);
